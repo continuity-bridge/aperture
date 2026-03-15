@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+*.key
+*.pem
+~/.aperture-token
+~/.aperture.conf
+~/.aperture-pids/
+~/.aperture-logs/
+~/.aperture-bridge.pid
