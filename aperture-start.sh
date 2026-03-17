@@ -5,7 +5,8 @@
 # Usage: ./aperture-start.sh [--allow /path/to/dir] [--subdomain my-aperture]
 #
 # Author: Jerry Jackson (Uncle Tallest) & Vector
-# Version: v0.3.1
+# Version: v0.3.2
+# Fixed: Function ordering bug, serveousercontent.com domain support
 
 set -euo pipefail
 
@@ -31,6 +32,55 @@ error()   { echo -e "${RED}[aperture]${NC} $*" >&2; }
 section() { echo -e "\n${CYAN}── $* ──${NC}"; }
 
 mkdir -p "$PID_DIR" "$LOG_DIR"
+
+# ── Helper functions ──────────────────────────────────────────────────────────
+
+is_running() {
+    local pid_file="$PID_DIR/$1.pid"
+    [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null
+}
+
+stop_process() {
+    local name="$1"
+    local pid_file="$PID_DIR/$name.pid"
+    if [[ -f "$pid_file" ]]; then
+        local pid
+        pid=$(cat "$pid_file")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            sleep 0.5
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+        rm -f "$pid_file"
+    fi
+}
+
+# ── do_ arguments ──────────────────────────────────────────────────────────
+
+do_stop() {
+    section "Stopping Aperture"
+    stop_process "bridge"
+    stop_process "mcp"
+    stop_process "tunnel"
+    rm -f "$HOME/.aperture-token" 2>/dev/null || true
+    info "Stopped."
+}
+
+do_status() {
+    section "Aperture Status"
+    for svc in bridge mcp tunnel; do
+        if is_running "$svc"; then
+            echo -e "  ${GREEN}●${NC} $svc (PID $(cat "$PID_DIR/$svc.pid"))"
+        else
+            echo -e "  ${RED}○${NC} $svc (not running)"
+        fi
+    done
+    if [[ -f "$HOME/.aperture-url" ]]; then
+        echo ""
+        echo -e "  Connector URL: ${CYAN}$(cat "$HOME/.aperture-url")${NC}"
+    fi
+}
+
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 
@@ -62,52 +112,6 @@ fi
 if [[ -z "$SUBDOMAIN" ]]; then
     SUBDOMAIN="aperture-$(whoami | tr -cd '[:alnum:]-' | head -c12)-$(hostname -s | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-' | head -c12)"
 fi
-
-# ── Helper: check running ─────────────────────────────────────────────────────
-
-is_running() {
-    local pid_file="$PID_DIR/$1.pid"
-    [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null
-}
-
-stop_process() {
-    local name="$1"
-    local pid_file="$PID_DIR/$name.pid"
-    if [[ -f "$pid_file" ]]; then
-        local pid
-        pid=$(cat "$pid_file")
-        if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-            sleep 0.5
-            kill -9 "$pid" 2>/dev/null || true
-        fi
-        rm -f "$pid_file"
-    fi
-}
-
-do_stop() {
-    section "Stopping Aperture"
-    stop_process "bridge"
-    stop_process "mcp"
-    stop_process "tunnel"
-    rm -f "$HOME/.aperture-token" 2>/dev/null || true
-    info "Stopped."
-}
-
-do_status() {
-    section "Aperture Status"
-    for svc in bridge mcp tunnel; do
-        if is_running "$svc"; then
-            echo -e "  ${GREEN}●${NC} $svc (PID $(cat "$PID_DIR/$svc.pid"))"
-        else
-            echo -e "  ${RED}○${NC} $svc (not running)"
-        fi
-    done
-    if [[ -f "$HOME/.aperture-url" ]]; then
-        echo ""
-        echo -e "  Connector URL: ${CYAN}$(cat "$HOME/.aperture-url")${NC}"
-    fi
-}
 
 # ── Stop anything already running ────────────────────────────────────────────
 
@@ -194,7 +198,7 @@ echo "$TUNNEL_PID" > "$PID_DIR/tunnel.pid"
 # Wait for tunnel URL
 TUNNEL_URL=""
 for i in {1..30}; do
-    TUNNEL_URL=$(grep -oP 'https://\S+\.serveo\.net' "$LOG_DIR/tunnel.log" 2>/dev/null | head -1 || true)
+    TUNNEL_URL=$(grep -oP 'https://\S+\.serveo(usercontent\.com|\.net)' "$LOG_DIR/tunnel.log" 2>/dev/null | head -1 || true)
     if [[ -n "$TUNNEL_URL" ]]; then
         break
     fi
@@ -221,7 +225,7 @@ if [[ -z "$TUNNEL_URL" ]]; then
     TUNNEL_PID=$!
     echo "$TUNNEL_PID" > "$PID_DIR/tunnel.pid"
     for i in {1..30}; do
-        TUNNEL_URL=$(grep -oP 'https://\S+\.serveo\.net' "$LOG_DIR/tunnel.log" 2>/dev/null | head -1 || true)
+        TUNNEL_URL=$(grep -oP 'https://\S+\.serveo(usercontent\.com|\.net)' "$LOG_DIR/tunnel.log" 2>/dev/null | head -1 || true)
         [[ -n "$TUNNEL_URL" ]] && break
         sleep 0.5
     done
